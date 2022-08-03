@@ -1,0 +1,349 @@
+---
+title: "Model Evaluation"
+author: "Anirudh Dahiya"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE)
+```
+
+In this exercise, we will practise model evaluation metrics in R. We will use **cancerdata.csv** dataset adapted from [UCI Machine Learning Repository](https://archive.ics.uci.edu/ml/datasets/Breast+Cancer+Wisconsin+(Diagnostic)) to build our model. Our aim is to classify  malignant breast cancer patients successfully. 
+
+Let's first load the required packages and import our data. Then, check the dataset using function `str()`. The column "diagnosis" shows whether a patient has cancer (1) or not (0). 
+
+```{r  message=FALSE}
+
+# Load caTools for data partitioning
+library(caTools)
+
+# Load e1071 package for svm
+library("e1071")
+
+# Assign cancerdata.csv to bcdata
+bcdata <- read.csv("cancerdata.csv")
+
+# Check the structure of the dataset
+str(bcdata)
+
+```
+
+* Remove patient "id" column. It does not affect the target variable.
+
+* Update the data type of the target variable if necessary.
+
+```{r  message=FALSE}
+
+# Remove patient id
+bcdata$id <- NULL
+
+# Update the data type if necessary
+bcdata$diagnosis <- as.factor(bcdata$diagnosis)
+
+```
+
+* Partition the dataset into training (80%) and test (20%) sets. 
+
+```{r  message=FALSE}
+
+# Set seed to 123
+set.seed(123)
+
+# Partition the data
+split <- sample.split(bcdata$diagnosis, SplitRatio = 0.80) 
+
+# Generate training and test sets and save as trainingset and testset
+training <- subset(bcdata, split == TRUE) 
+test <- subset(bcdata, split == FALSE) 
+
+```
+
+***
+
+**Random Forest**
+
+Random Forest consists of a large number of individual decision trees that operate as a group. It is a popular ensemble method that can be used to build predictive models for both classification and regression problems. 
+
+In order to build this model, we should load `randomForest` package.
+
+```{r  message=FALSE}
+
+#install.packages("randomForest)
+
+# Load randomForest package 
+library(randomForest)
+
+```
+
+Our target variable is stored in column "diagnosis". We will use all features in our model. The basic syntax of Random Forest is given as follows:
+
+    randomForest(formula, data)
+
+- Formula shows which features are used in modelling to predict the target variable.
+
+- Data is the dataset that will be used for model building.
+
+* Build and print our Random Forest model.
+
+* Print the importance weights of attributes by using `importance(modelname)` function from this package.
+
+```{r  message=FALSE}
+
+# Set seed
+set.seed(10)
+
+# Build Random Forest model and assign it to model_RF
+model_RF <- randomForest(diagnosis ~. , training, mtry= 7, nodesize = 7, sampsize= 257)
+
+# Print model_RF
+#print(model_RF)
+
+# Check the important attributes by using importance() function
+#importance(model_RF)
+
+
+```
+
+We can tune Random Forest hyperparameters by using a search method. Tunning hyperparameters helps to control training process and gain better result. In this demonstration, we will focus on three main hyperparameters in Random Forest model which are `mtry`, `nodesize` and `sampsize`. These hyperparameters can be defined as follows:
+
+  - `mtry`: the number of predictors to sample at each split. The default value for a classification problem is given as the square root of total number of the features in the training data. 
+  - `nodesize`: the minimum number of instances in a terminal node. The default value for a classification problem is 1.
+  - `sampsize`: the size of sample to draw. The default value for sample size is 2/3 of the training data.
+  
+For more information on the Random Forest model, please check [this link](https://www.rdocumentation.org/packages/randomForest/versions/4.6-14/topics/randomForest).
+
+Let's search the following values for `mtry`, `nodesize` and `sampsize`. Function `seq(from = .., to = .., by = ..)` is used to generate regular sequences. For instance, the output of `seq(3, 7, 2)` is (3, 5, 7). We will use this function to genarate the possible values of hyperparameters.
+
+```{r}
+
+# List of possible values for mtry, nodesize and sampsize
+mtry_val <- seq(3, 7, 2)
+nodesize_val <- seq(1, 10, 2)
+sampsize_val <- floor(nrow(training)*c(0.5, 0.65, 0.8))
+
+```
+
+Next, we will create a data frame to store all combinations. For this operation, we use `expand.grid()` function.
+
+```{r}
+
+# Create a data frame containing all combinations 
+setOfvalues <- expand.grid(mtry = mtry_val, nodesize = nodesize_val, sampsize = sampsize_val)
+
+# Create an empty vector to store error values
+err <- c()
+
+# Write a  loop over the rows of setOfvalues to train random forest model for all possible values
+for (i in 1:nrow(setOfvalues)){
+    # Since random forest model uses random numbers set the seed
+    set.seed(10)
+    
+    # Train a Random Forest model
+    model <- randomForest(diagnosis~., training,
+                          mtry = setOfvalues$mtry[i],
+                          nodesize = setOfvalues$nodesize[i],
+                          sampsize = setOfvalues$sampsize[i])
+                          
+    # Store the error rate for the model     
+    err[i] <- model$err.rate[nrow(model$err.rate), "OOB"]
+}
+
+# Identify optimal set of hyperparmeters based on error rate
+best_comb <- which.min(err)
+print(setOfvalues[best_comb,])
+
+```
+
+Note that `randomForest` package have `tuneRF()` function for searching best `mtry` values given for your data. Instead of grid search, you can use this function to identify best `mtry` value for your data mining problem. For more information, please check [this link](https://www.rdocumentation.org/packages/iRF/versions/2.0.0/topics/tuneRF).
+
+* Predict the class of the test data and store the result as *prediction_RF*.
+
+```{r  message=FALSE}
+
+# Predict the class of the test data
+prediction_RF <- predict(model_RF, test)
+
+```
+
+* Create a confusion matrix by comparing the column "diagnosis" in the test data with the vector predictions of Random Forest model. 
+
+We can use `confusionMatrix()` function in `caret` package to print performance metrics. It provides several statistics on the performance of your model. For more information, you can check the documentation by clicking  [here](https://www.rdocumentation.org/packages/caret/versions/6.0-84/topics/confusionMatrix).
+
+Let's load `caret` package and use `confusionMatrix()` function with three arguments; predicted target variable, actual target variable and the positive class. In order to set the positive class, we add `positive='1'` argument to this function.
+
+```{r  message=FALSE}
+# Load Caret package for computing Confusion matrix
+library(caret) 
+
+# The last argument sets the positive class
+confusionMatrix(prediction_RF, test$diagnosis, positive='1', mode = "prec_recall")
+
+```
+
+***
+
+**SVM**
+
+Now, we will work on an SVM model. Load `e1071` package to build SVM model. 
+
+* Follow the same steps as in the Random Forest model and build our SVM model. Set kernel method as radial. 
+
+```{r  message=FALSE}
+
+# Build SVM model and assign it to model_SVM
+model_SVM <- svm(diagnosis ~., data = training, kernel= "radial", scale = TRUE, probability = TRUE)
+
+```
+
+Note that by setting probability argument to `TRUE` in `svm()` function, we can obtain the class probabilities as well as the predicted classes of the target variable.
+
+* Predict the class of the test data and store the result as *prediction_SVM*.
+
+* Use `confusionMatrix()` function to print model performance results.
+
+```{r  message=FALSE}
+
+# Predict the class of the test data 
+prediction_SVM <- predict(model_SVM, test)
+
+# Use confusionMatrix to print the performance of SVM model
+confusionMatrix(prediction_SVM, test$diagnosis, positive='1', mode = "prec_recall")
+
+```
+
+***
+
+Next, we will visualise the performances of Random Forest and SVM by using ROC and Gain charts. To plot these charts, we should load `pROC` package. We use `roc()` function to evaluate the results of the predictive models. 
+
+`roc()` returns a “roc” object which will be used to plot ROC curve. This function takes two arguments; predicted class probabilities (likelihood of belonging to a class) and actual values of the test data. First, load the `pROC` package.
+
+* Obtain class probabilities (likelihood of belonging to a class) for Random Forest and SVM models. 
+
+  In order to extract probabilities for SVM, we use `attr()` function.
+This function takes two arguments; an object whose attributes are to be accessed and a string specifying which attribute is to be accessed. For SVM, the object is the output of `predict()` function and the string is "probabilities".
+
+```{r  message=FALSE}
+
+# Load the ROCR package
+#install.packages("pROC")
+library(pROC) 
+
+# Obtain class probabilities by using predict() and adding type = "prob" for Random Forest model_RF
+prob_RF <- predict(model_RF, test, type = "prob")
+
+
+# Add probability = TRUE for SVM; model_SVM
+SVMpred <- predict(model_SVM, test, probability = TRUE)
+
+# Obtain predicted probabilities for SVM
+prob_SVM <- attr(SVMpred, "probabilities")
+
+
+```
+
+* Use `roc()` function to generate input for the ROC curve of Random Forest. The basic syntax of this function is as follows:
+
+             roc(testdata$target, probabilities)
+             
+  Note that depending on the data mining model, the basic syntax can change. 
+
+Random Forest:
+```{r  message=FALSE}
+
+# Use roc function to return some performance metrics
+ROC_RF <- roc(test$diagnosis, prob_RF[,2])
+
+```
+
+* Extract True Positive Rate (Sensitivities) and False Positive Rate (Specificities) for plotting.
+
+```{r  message=FALSE}
+
+# Extract required data from ROC_RF
+df_RF = data.frame((1-ROC_RF$specificities), ROC_RF$sensitivities)
+
+```
+
+* Follow the similar steps for SVM model.
+
+SVM:
+```{r  message=FALSE}
+
+# Use roc function to return some performance metrics
+ROC_SVM <- roc(test$diagnosis, prob_SVM[,1])
+
+# Extract required data from ROC_SVM
+df_SVM = data.frame((1-ROC_SVM$specificities), ROC_SVM$sensitivities)
+
+```
+
+* Plot ROC chart for Random Forest and SVM models. 
+
+```{r  message=FALSE}
+
+# Plot the ROC curve for Random Forest and SVM
+
+plot(df_RF, col="red", type="l",        # first adds ROC curve for Random Forest
+xlab="False Positive Rate (1-Specificity)", ylab="True Positive Rate (Sensitivity)")
+lines(df_SVM, col="blue")               # adds ROC curve for SVM
+
+abline(a = 0, b = 1, col = "lightgray") # adds a diagonal line
+
+legend("bottomright",
+c("Random Forest", "SVM"),
+fill=c("red", "blue"))
+
+```
+
+* Compute AUC values for Random Forest and SVM models by using `auc()` function. You can use “roc” object obtained from `roc()` function to compute AUC value.
+
+```{r  message=FALSE}
+
+# Calculate the area under the curve (AUC) for Random Forest
+auc(ROC_RF)
+
+# Calculate the area under the curve (AUC) for SVM
+auc(ROC_SVM)
+
+```
+
+***
+
+Next, we will plot Cumulative Response (Gain) chart for Random Forest and SVM models. For this task, we need to install and load `CustomerScoringMetrics` package. Specifically, we will use `cumGainsTable()` function to calculate cumulative gain values for our chart. This function takes three arguments. The first one is the prediction probabilities (scores), the second one is the actual values of the target variables and the third one is the increment of the threshold value. The basic syntax is:
+
+    cumGainsTable(probabilities, actual value of the target variable, resolution)
+    
+* Compute gain values for Random Forest and SVM.
+
+```{r  message=FALSE}
+
+# Load the CustomerScoringMetrics package
+#install.packages("CustomerScoringMetrics")
+library(CustomerScoringMetrics)
+
+```
+
+```{r  message=FALSE}
+
+# Extract the gain values for Gain chart
+GainTable_RF <- cumGainsTable(prob_RF[,2], test$diagnosis, resolution = 1/100)
+
+GainTable_SVM <- cumGainsTable(prob_SVM[,1], test$diagnosis, resolution = 1/100)
+
+```
+
+* Plot the gain chart for Random Forest and SVM.
+
+```{r  message=FALSE}
+
+# Plot the Gain chart for Random Forest and SVM
+
+plot(GainTable_RF[,4], col="red", type="l",     
+xlab="Percentage of test instances", ylab="Percentage of correct predictions")
+lines(GainTable_SVM[,4], col="blue", type="l")
+
+legend("bottomright",
+c("Random Forest", "SVM"),
+fill=c("red", "blue"))
+
+```
